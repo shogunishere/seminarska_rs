@@ -11,15 +11,45 @@
 #define I2C_ADD_IO1 32
 
 #define RATE 10
+#define WINDOW_SIZE 50
+#define STEP_THRESHOLD 0.15
 
 #define BLYNK_TEMPLATE_ID "TMPL4mr4Ly93g"
 #define BLYNK_TEMPLATE_NAME "Seminarska RS"
 #define BLYNK_AUTH_TOKEN "LkKa02a7HaZQ1m5ZUjLaiNwq6TXqaLhV"
-#define STEP_THRESHOLD 1.2 // You may need to adjust this based on your testing
 
 // WiFi credentials
 char ssid[] = "tocka";
 char pass[] = "koda12345";
+
+// Meritve sa senzorja 
+uint8_t accMeas[] = {0,0,0,0,0,0};
+
+Ticker readSensor, leds;
+
+// Meritve 
+float accX = 0; 
+float accY = 0; 
+float accZ = 0; 
+
+// Bufferji 
+float accXBuffer[WINDOW_SIZE] = {0};
+float accYBuffer[WINDOW_SIZE] = {0};
+float accZBuffer[WINDOW_SIZE] = {0};
+
+// Zadnje meritve
+float lastAccX = 0;
+float lastAccY = 0;
+float lastAccZ = 0;
+
+// Minimumi
+float minAccX, minAccY, minAccZ, maxAccX, maxAccY, maxAccZ;
+
+// Dynamic thresholdi
+float dynamicThresholdX, dynamicThresholdY, dynamicThresholdZ;
+
+int bufferIndex = 0;
+uint32_t steps = 0; // This will hold the number of steps
 
 // <-------------------- I2C  funkciji zacetek -------------------------->
 void I2CWriteRegister(uint8_t I2CDevice, uint8_t RegAdress, uint8_t Value){
@@ -56,21 +86,6 @@ void I2CReadRegister(uint8_t I2CDevice, uint8_t RegAdress, uint8_t NBytes, uint8
 // <-------------------- I2C  Funkcije konec -------------------------->
 
 
-// Meritve sa senzorja 
-uint8_t accMeas[] = {0,0,0,0,0,0};
-
-Ticker readSensor, leds;
-
-// Meritve 
-float accX = 0; 
-float accY = 0; 
-float accZ = 0; 
-
-uint32_t steps = 0; // This will hold the number of steps
-
-float previousAccMag = 0.0; 
-bool isStep = false; 
-
 void MPU9250_init(){
   // Resetiraj MPU9250 senzora => Register PWR_MGMT_1 (107)
   I2CWriteRegister(MPU_ADD,107,128); // 128 = 1000 0000
@@ -95,7 +110,7 @@ void MPU9250_init(){
 void readAcc(){
   static uint32_t count = 0;
   int32_t tmp;
-  // TODO
+
   I2CReadRegister(MPU_ADD,ACC_MEAS_REG,6,accMeas);
 
   tmp = (((int8_t)accMeas[0] << 8) + (uint8_t)accMeas[1]);
@@ -109,27 +124,64 @@ void readAcc(){
 
 
   accX /= pow(2,14);
-
   accY /= pow(2,14);
-
   accZ /= pow(2,14);
 
+  // Dodajanje novih meritev v buffer
+  accXBuffer[bufferIndex] = accX;
+  accYBuffer[bufferIndex] = accY;
+  accZBuffer[bufferIndex] = accZ;
 
-  // Calculate acceleration magnitude (Euclidean distance)
-  float accMag = sqrt(pow(accX, 2) + pow(accY, 2) + pow(accZ, 2));
-  
-  // Check if a step has been made
-  if (accMag > STEP_THRESHOLD && previousAccMag <= STEP_THRESHOLD) {
-    if (!isStep) {
-      isStep = true;
+  // Izracun razlik
+  float diffX = abs(accX - lastAccX);
+  float diffY = abs(accY - lastAccY);
+  float diffZ = abs(accZ - lastAccZ);
+
+  // Determine which axis had the biggest change
+  if (diffX > diffY && diffX > diffZ) {
+    // X axis had the biggest change
+    dynamicThresholdX = (maxAccX + minAccX) / 2;
+
+    // Preckamo dynamic threshold
+    if (accX < dynamicThresholdX && lastAccX > dynamicThresholdX && diffX > STEP_THRESHOLD) {
       steps++;
-
     }
-  } else if (accMag < STEP_THRESHOLD) {
-    isStep = false;
+
+    // Zapomni zadnjo meritev
+    lastAccX = accX;
+    maxAccX = -99999;
+    minAccX = 99999;
+  } else if (diffY > diffX && diffY > diffZ) {
+    // Y axis had the biggest change
+    dynamicThresholdY = (maxAccY + minAccY) / 2;
+
+    // Preckamo dynamic threshold
+    if (accY < dynamicThresholdY && lastAccY > dynamicThresholdY && diffY > STEP_THRESHOLD) {
+      steps++;
+    }
+
+    // Zapomni zadnjo meritev
+    lastAccY = accY;
+    maxAccY = -99999;
+    minAccY = 99999;
+
+  } else {
+    // Z axis had the biggest change
+    dynamicThresholdZ = (maxAccZ + minAccZ) / 2;
+
+    // Preckamo dynamic threshold
+    if (accZ < dynamicThresholdZ && lastAccZ > dynamicThresholdZ && diffZ > STEP_THRESHOLD) {
+      steps++;
+    }
+
+    // Zapomni zadnjo meritev
+    lastAccZ = accZ;
+    maxAccZ = -99999;
+    minAccZ = 99999;
   }
-  
-  previousAccMag = accMag;
+
+  // Increment the buffer index, wrapping around to the start if necessary
+  bufferIndex = (bufferIndex + 1) % WINDOW_SIZE;
 
   // Print the results when the count is divisible by RATE
   if (count % RATE == 0)
@@ -140,6 +192,8 @@ void readAcc(){
     Serial.print(accY);
     Serial.print(", ACC_Z= ");
     Serial.println(accZ);
+    Serial.print("Steps: ");
+    Serial.println(steps);
 
     // Send the acceleration data to Blynk app
     Blynk.virtualWrite(V0, accX);
