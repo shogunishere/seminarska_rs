@@ -2,6 +2,7 @@
 #include<Ticker.h>
 #include <ESP8266WiFi.h>
 #include <BlynkSimpleEsp8266.h>
+#include <PubSubClient.h>
 
 // Naslov MPU9250 na I2C vodilu
 #define MPU_ADD 104
@@ -12,7 +13,7 @@
 
 #define RATE 10
 #define WINDOW_SIZE 50
-#define STEP_THRESHOLD 0.15
+#define STEP_THRESHOLD 0.1 // 0.07
 
 #define BLYNK_TEMPLATE_ID "TMPL4mr4Ly93g"
 #define BLYNK_TEMPLATE_NAME "Seminarska RS"
@@ -20,7 +21,19 @@
 
 // WiFi credentials
 char ssid[] = "tocka";
-char pass[] = "koda12345";
+char password[] = "koda12345";
+
+
+// MQQT
+const char* mqtt_server = "broker.mqtt-dashboard.com";
+const char* topic = "acceleration";
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+unsigned long lastMsg = 0;
+#define MSG_BUFFER_SIZE	(50)
+char msg[MSG_BUFFER_SIZE];
+int value = 0;
 
 // Meritve sa senzorja 
 uint8_t accMeas[] = {0,0,0,0,0,0};
@@ -202,47 +215,100 @@ void readAcc(){
     
     // Send the step count to Blynk app
     Blynk.virtualWrite(V3, steps);
+
+    // MQTT
+    // sends acceleration data as string stored in msg variable
+    client.loop();
+    snprintf (msg, MSG_BUFFER_SIZE, "%4.2f,%4.2f,%4.2f", accX, accY, accZ);
+    Serial.print("Publish message: ");
+    Serial.println(msg);
+    client.publish(topic, msg);
+
   }
 
   // Increment the counter
   count = count + 1;
 }
 
+void setup_wifi() {
 
-void setup() {
-  // put your setup code here, to run once:
-  // Serijska komunikacija
-  Serial.begin(115200);
-    // I2C
-  Wire.begin(12,14);
-  // SDA - 12 pin
-  // SCL - 14 pin
-  Wire.setClock(100000);
-  // Podesavanje senzorja 
-  // https://github.com/bolderflight/mpu9250/blob/main/src/mpu9250.cpp
-  MPU9250_init();
-  
-  // Kalibracija ?
-  // calibrateGyro();
-  
-  // Branje senzorja
-  readSensor.attach(0.1, readAcc);
+  delay(10);
+  // We start by connecting to a WiFi network
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
 
-  // Connect to Wi-Fi
-  WiFi.begin(ssid, pass);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
 
-  Serial.println("Connected to Wi-Fi");
+  randomSeed(micros());
 
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Create a random client ID
+    String clientId = "ESP8266Client-";
+    clientId += String(random(0xffff), HEX);
+    // Attempt to connect
+    if (client.connect(clientId.c_str())) {
+      Serial.println("connected");
+      // ... and resubscribe
+      client.subscribe("inTopic");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
+void setup() {
+  // put your setup code here, to run once:
+  // Serijska komunikacija
+  Serial.begin(115200);
+  
+  setup_wifi();
+
+  client.setServer(mqtt_server, 1883);
+  
+  // I2C
+  Wire.begin(12,14);
+
+  // SDA - 12 pin
+  // SCL - 14 pin
+  Wire.setClock(100000);
+
+  // Podesavanje senzorja 
+  // https://github.com/bolderflight/mpu9250/blob/main/src/mpu9250.cpp
+  MPU9250_init();
+  
+  // Branje senzorja
+  readSensor.attach(0.1, readAcc);
+    
   // Connect to Blynk
-  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, password);
+
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
   Blynk.run();
+
+  if (!client.connected()) {
+    reconnect();
+  }
 }
