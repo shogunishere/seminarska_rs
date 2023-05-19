@@ -31,7 +31,7 @@ const char* topic = "acceleration";
 WiFiClient espClient;
 PubSubClient client(espClient);
 unsigned long lastMsg = 0;
-#define MSG_BUFFER_SIZE	(50)
+#define MSG_BUFFER_SIZE	(61)
 char msg[MSG_BUFFER_SIZE];
 int value = 0;
 
@@ -219,7 +219,8 @@ void readAcc(){
     // MQTT
     // sends acceleration data as string stored in msg variable
     client.loop();
-    snprintf (msg, MSG_BUFFER_SIZE, "%4.2f,%4.2f,%4.2f", accX, accY, accZ);
+
+    snprintf (msg, MSG_BUFFER_SIZE, "%lu,%4.2f,%4.2f,%4.2f", millis() / 1000 , accX, accY, accZ);
     Serial.print("Publish message: ");
     Serial.println(msg);
     client.publish(topic, msg);
