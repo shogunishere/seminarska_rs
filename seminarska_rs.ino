@@ -268,11 +268,14 @@ void readAcc(){
 
     int activity;
 
-    if (steps > 4) {
-      activity = 0;
+    if (steps > 5) {
+      activity = 2;
+    }
+    else if (steps > 0) {
+      activity = 1;
     }
     else {
-      activity = 1;
+      activity = 0;
     }
 
     totalsteps += steps;
@@ -293,7 +296,7 @@ void readAcc(){
     Serial.print("Distance: ");
     Serial.println(totaldistance/100);
     Serial.print("Calories: ");
-    Serial.println(totalcalories);
+    Serial.println(totalcalories/100);
     Serial.print("Current activity: ");
     Serial.println(activity);
 
@@ -303,7 +306,9 @@ void readAcc(){
     Blynk.virtualWrite(V2, accZ);
     
     // Send the step count to Blynk app
-    Blynk.virtualWrite(V3, steps);
+    Blynk.virtualWrite(V3, totalsteps);
+    Blynk.virtualWrite(V5, totalcalories/100);
+    Blynk.virtualWrite(V4, totaldistance/100);
 
     // MQTT
     // sends acceleration data as string stored in msg variable
@@ -413,7 +418,7 @@ void setup() {
 
   // Kalibracija
   Serial.println("Kalibracija...");
-  delay(500);
+  delay(5000);
   calibration();
   
   // Branje senzorja
