@@ -11,9 +11,10 @@
 // luci
 #define I2C_ADD_IO1 32
 
-#define RATE 10
+#define RATE 40
 #define WINDOW_SIZE 50
 #define STEP_THRESHOLD 0.1 // 0.07
+#define CAL 100.0f
 
 #define BLYNK_TEMPLATE_ID "TMPL4mr4Ly93g"
 #define BLYNK_TEMPLATE_NAME "Seminarska RS"
@@ -40,10 +41,25 @@ uint8_t accMeas[] = {0,0,0,0,0,0};
 
 Ticker readSensor, leds;
 
+// Mere in cilji
+int32_t steps_goal = 6000;
+int32_t calorie_goal = 2000;
+int32_t calorie_counter = 0;
+int32_t weight = 75;
+int32_t height = 180;
+float totaldistance = 0;
+uint32_t totalsteps = 0;
+int32_t totalcalories = 0;
+
 // Meritve 
 float accX = 0; 
 float accY = 0; 
 float accZ = 0; 
+
+// Kalibracija
+float accX_cal = 0;
+float accY_cal = 0;
+float accZ_cal = 0;
 
 // Bufferji 
 float accXBuffer[WINDOW_SIZE] = {0};
@@ -118,6 +134,43 @@ void MPU9250_init(){
   // Opciono => Register ACCEL_CONFIG_2 (29)
   I2CWriteRegister(MPU_ADD,28,0); // 
   delay(100);
+}
+
+void calibration() {
+
+  int32_t table_x = 0;
+  int32_t table_y = 0;
+  int32_t table_z = 0;
+
+  for (int i = 0; i < 50; i++) {
+
+    Wire.beginTransmission(MPU_ADD);
+    Wire.write(ACC_MEAS_REG);
+    Wire.endTransmission();
+
+    Wire.requestFrom(MPU_ADD, 6);
+
+    table_x = (uint8_t) Wire.read();
+    table_x = table_x << 8;
+    table_x += (uint8_t) Wire.read();
+    accX_cal += table_x / (128*128);
+    table_y = (uint8_t) Wire.read();
+    table_y = table_y << 8;
+    table_y += (uint8_t) Wire.read();
+    accY_cal += table_y / (128*128);
+    table_z = (uint8_t) Wire.read();
+    table_z = table_z << 8;
+    table_z += (uint8_t) Wire.read();
+    accZ_cal += table_z / (128*128);
+
+    //delay(1000 / RATE);
+  }
+
+  accX_cal /= CAL;
+  accY_cal /= CAL;
+  accZ_cal /= CAL;
+
+  Serial.println("Skalibriran!");
 }
 
 void readAcc(){
@@ -199,14 +252,50 @@ void readAcc(){
   // Print the results when the count is divisible by RATE
   if (count % RATE == 0)
   {
+    // Računanje hitrosti
+
+    float speed = get_stride(steps) * steps / 2;
+
+    // Računanje razdalje
+
+    float distance = get_stride(steps) * steps;
+
+    // Računanje kalorij
+
+    float calories = speed * weight / 400;
+
+    // Hoja ali tek?
+
+    int activity;
+
+    if (steps > 4) {
+      activity = 0;
+    }
+    else {
+      activity = 1;
+    }
+
+    totalsteps += steps;
+    totalcalories += calories;
+    totaldistance += distance;
+    steps = 0;
+
     Serial.print("ACC_X: X= ");
     Serial.print(accX);
     Serial.print(", ACC_Y= ");
     Serial.print(accY);
     Serial.print(", ACC_Z= ");
     Serial.println(accZ);
-    Serial.print("Steps: ");
-    Serial.println(steps);
+    Serial.print("Total steps: ");
+    Serial.println(totalsteps);
+    Serial.print("Current speed: ");
+    Serial.println(speed);
+    Serial.print("Distance: ");
+    Serial.println(totaldistance/100);
+    Serial.print("Calories: ");
+    Serial.println(totalcalories);
+    Serial.print("Current activity: ");
+    Serial.println(activity);
 
     // Send the acceleration data to Blynk app
     Blynk.virtualWrite(V0, accX);
@@ -229,6 +318,31 @@ void readAcc(){
 
   // Increment the counter
   count = count + 1;
+}
+
+float get_stride(int32_t n_steps) {
+  if (n_steps == 1) {
+    return height / 5;
+  }
+  else if (n_steps == 2) {
+    return height / 4;
+  }
+  else if (n_steps == 3) {
+    return height / 3;
+  }
+  else if (n_steps == 4) {
+    return height / 2;
+  }
+  else if (n_steps == 5) {
+    return height / 1.2;
+  }
+  else if (n_steps == 6 || n_steps == 7) {
+    return height;
+  }
+  else if (n_steps > 7) {
+    return height * 1.2;
+  }
+  return 1;
 }
 
 void setup_wifi() {
@@ -296,6 +410,11 @@ void setup() {
   // Podesavanje senzorja 
   // https://github.com/bolderflight/mpu9250/blob/main/src/mpu9250.cpp
   MPU9250_init();
+
+  // Kalibracija
+  Serial.println("Kalibracija...");
+  delay(500);
+  calibration();
   
   // Branje senzorja
   readSensor.attach(0.1, readAcc);
